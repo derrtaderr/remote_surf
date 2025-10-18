@@ -42,6 +42,7 @@ dependencies = [
     "typer>=0.12.0",
     "rich>=13.9.0",
     "httpx>=0.27.0",
+    "requests>=2.31.0",
     "pytz>=2024.2",
     "python-multipart>=0.0.12",
 ]
@@ -70,10 +71,10 @@ ml = [
 bluebreaks = "bluebreaks.cli.main:app"
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/remote_surf"
-Documentation = "https://github.com/YOUR_USERNAME/remote_surf/wiki"
-Repository = "https://github.com/YOUR_USERNAME/remote_surf"
-Issues = "https://github.com/YOUR_USERNAME/remote_surf/issues"
+Homepage = "https://github.com/derrtaderr/remote_surf"
+Documentation = "https://github.com/derrtaderr/remote_surf/wiki"
+Repository = "https://github.com/derrtaderr/remote_surf"
+Issues = "https://github.com/derrtaderr/remote_surf/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
