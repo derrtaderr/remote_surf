@@ -122,6 +122,7 @@ def generate_training_data(
         for i, time_sample in enumerate(time_samples):
             logger.info(f"  Time sample {i+1}/{num_time_samples}: {time_sample.isoformat()}")
 
+            scanner = None
             try:
                 # Initialize scanner
                 scanner = CoastlineScanner(
@@ -137,8 +138,6 @@ def generate_training_data(
                     spacing_m=spacing_m,
                     min_score=0.0  # Get all candidates
                 )
-
-                scanner.close()
 
                 # Convert GeoJSON to candidate dicts
                 for feature in geojson["features"]:
@@ -170,6 +169,10 @@ def generate_training_data(
             except Exception as e:
                 logger.error(f"Failed to scan {region_name} at {time_sample}: {e}", exc_info=True)
                 continue
+            finally:
+                # Always close scanner to prevent resource leak
+                if scanner is not None:
+                    scanner.close()
 
     logger.info(f"Total candidates generated: {len(all_candidates)}")
     return all_candidates
