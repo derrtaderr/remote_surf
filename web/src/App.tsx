@@ -1,35 +1,49 @@
 import { useState } from 'react'
-import Map from 'react-map-gl/maplibre'
-import 'maplibre-gl/dist/maplibre-gl.css'
+import MapView from './components/MapView'
 
 function App() {
-  const [viewState, setViewState] = useState({
-    longitude: -111.234,
-    latitude: 26.543,
-    zoom: 10
-  })
+  const [minScore, setMinScore] = useState(0)
+  const [spacing, setSpacing] = useState(1000)
 
   return (
     <div className="app">
       <header className="app-header">
         <h1>Remote Surf</h1>
         <p>Find unknown surf from your sailboat</p>
+
+        {/* Filter controls */}
+        <div className="app-controls">
+          <div className="control-group">
+            <label htmlFor="minScore">Min Score: {minScore.toFixed(1)}</label>
+            <input
+              id="minScore"
+              type="range"
+              min="0"
+              max="10"
+              step="0.5"
+              value={minScore}
+              onChange={(e) => setMinScore(parseFloat(e.target.value))}
+            />
+          </div>
+
+          <div className="control-group">
+            <label htmlFor="spacing">Spacing: {spacing}m</label>
+            <input
+              id="spacing"
+              type="range"
+              min="200"
+              max="2000"
+              step="100"
+              value={spacing}
+              onChange={(e) => setSpacing(parseInt(e.target.value))}
+            />
+          </div>
+        </div>
       </header>
 
       <main className="app-main">
-        <Map
-          {...viewState}
-          onMove={evt => setViewState(evt.viewState)}
-          style={{ width: '100%', height: '100%' }}
-          mapStyle="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
-        >
-          {/* TODO: Add markers, layers, controls */}
-        </Map>
+        <MapView minScore={minScore} spacing={spacing} />
       </main>
-
-      <div className="app-info">
-        <p>🚧 MVP in development - API integration coming soon</p>
-      </div>
     </div>
   )
 }
