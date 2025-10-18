@@ -12,15 +12,24 @@
     "test": "vitest"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "maplibre-gl": "^4.7.1",
-    "react-map-gl": "^7.1.7",
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/cli": "^7.4.3",
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/geolocation": "^7.1.5",
+    "@capacitor/ios": "^7.4.3",
+    "@capacitor/local-notifications": "^7.0.3",
+    "@capacitor/push-notifications": "^7.0.3",
+    "@capacitor/splash-screen": "^7.0.3",
+    "@capacitor/status-bar": "^7.0.3",
     "@tanstack/react-query": "^5.59.0",
     "axios": "^1.7.7",
     "date-fns": "^4.1.0",
-    "zustand": "^5.0.1",
-    "recharts": "^2.12.7"
+    "maplibre-gl": "^4.7.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-map-gl": "^7.1.7",
+    "recharts": "^2.12.7",
+    "zustand": "^5.0.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

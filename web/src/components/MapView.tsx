@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Map, { Marker, Popup, NavigationControl, ScaleControl, Source, Layer } from 'react-map-gl/maplibre';
 import { api, SurfCandidate, WindFeature, SwellFeature } from '../services/api';
 import type { CircleLayer, LineLayer } from 'react-map-gl/maplibre';
+import SurfAlertsPanel from './SurfAlertsPanel';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 interface MapViewProps {
@@ -147,13 +148,21 @@ const MapView = ({ minScore, spacing }: MapViewProps) => {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <SurfAlertsPanel />
       <Map
         {...viewState}
         onMove={evt => setViewState(evt.viewState)}
         style={{ width: '100%', height: '100%' }}
         mapStyle="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
+        touchZoomRotate={true}
+        touchPitch={true}
+        dragPan={true}
+        dragRotate={false}
+        scrollZoom={true}
+        doubleClickZoom={true}
+        keyboard={true}
       >
-        <NavigationControl position="top-right" />
+        <NavigationControl position="top-right" showCompass={false} />
         <ScaleControl />
 
         {/* Swell arrows layer */}
@@ -183,9 +192,10 @@ const MapView = ({ minScore, spacing }: MapViewProps) => {
             }}
           >
             <div
+              className="surf-marker"
               style={{
-                width: '24px',
-                height: '24px',
+                width: '32px',
+                height: '32px',
                 borderRadius: '50%',
                 backgroundColor: getMarkerColor(candidate.properties.final_score),
                 border: '2px solid white',
@@ -194,9 +204,10 @@ const MapView = ({ minScore, spacing }: MapViewProps) => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '10px',
+                fontSize: '12px',
                 fontWeight: 'bold',
                 color: 'white',
+                touchAction: 'manipulation',
               }}
               title={`Score: ${candidate.properties.final_score.toFixed(1)}`}
             >
@@ -335,6 +346,7 @@ const MapView = ({ minScore, spacing }: MapViewProps) => {
 
       {/* Refresh button */}
       <button
+        className="map-button"
         onClick={() => {
           fetchCandidates();
           fetchLayers();
@@ -354,14 +366,15 @@ const MapView = ({ minScore, spacing }: MapViewProps) => {
           cursor: 'pointer',
           boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
           zIndex: 10,
-          opacity: loading ? 0.6 : 1
+          opacity: loading ? 0.6 : 1,
+          touchAction: 'manipulation'
         }}
       >
         {loading ? 'Loading...' : 'Refresh'}
       </button>
 
       {/* Layer toggles */}
-      <div style={{
+      <div className="layer-controls" style={{
         position: 'absolute',
         top: '16px',
         left: '16px',
