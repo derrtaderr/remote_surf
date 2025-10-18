@@ -40,11 +40,12 @@ def evaluate_anchorage(
     # Estimate anchorage location (offshore from candidate)
     # Typically 0.5-1nm offshore
     distance_nm = 0.7  # nautical miles
-    distance_deg = distance_nm / 60  # rough conversion
+    distance_deg = distance_nm / 60  # rough conversion (1 degree ≈ 60 nm at equator)
 
     # Anchor offshore along shore normal direction
+    # Account for latitude in longitude conversion (cosine of latitude)
     anchor_lat = candidate_lat + distance_deg * np.cos(np.radians(shore_normal))
-    anchor_lon = candidate_lon + distance_deg * np.sin(np.radians(shore_normal))
+    anchor_lon = candidate_lon + distance_deg * np.sin(np.radians(shore_normal)) / np.cos(np.radians(candidate_lat))
 
     # Estimate depth at anchorage (typically deeper than surf zone)
     # Simplification: anchor depth ≈ candidate depth + 3-8m

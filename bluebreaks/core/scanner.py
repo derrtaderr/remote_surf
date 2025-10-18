@@ -181,7 +181,8 @@ class CoastlineScanner:
     ) -> List[Dict]:
         """Score all candidates"""
         # Initialize tide module if not already done
-        if not self.tide_module:
+        # TideModule handles None by using mock stations
+        if self.tide_module is None:
             self.tide_module = TideModule(self.tide_stations_path)
 
         # Use mean values from wave/wind grids (simplified)
