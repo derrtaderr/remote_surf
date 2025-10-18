@@ -191,9 +191,18 @@ class CoastlineScanner:
             # Calculate exposure
             exposure = calculate_exposure(wave_dir, shore_normal)
 
+            # Compute wave transformation (refraction at shore)
+            transform = compute_wave_transformation(
+                deep_water_dir=wave_dir,
+                shore_normal=shore_normal,
+                depth_m=depth,
+                period_s=Tp
+            )
+            nearshore_dir = transform["nearshore_direction"]
+
             # Simple shoaling (would need proper transect)
             shoaling_coeff = shoaling_coefficient(50.0, depth, Tp)
-            refraction_coeff = 1.0  # Simplified
+            refraction_coeff = transform["Kr"]
 
             # Calculate score
             score_result = calculate_surf_score(
@@ -211,7 +220,12 @@ class CoastlineScanner:
             )
 
             candidate["score"] = score_result
-            candidate["wave"] = {"hs": Hs, "tp": Tp, "dir": wave_dir}
+            candidate["wave"] = {
+                "hs": Hs,
+                "tp": Tp,
+                "dir": wave_dir,
+                "nearshore_dir": nearshore_dir  # Add transformed direction
+            }
             candidate["wind"] = {"speed": wind_speed, "dir": wind_dir}
 
         return candidates
@@ -236,6 +250,7 @@ class CoastlineScanner:
                         "hs": round(candidate["wave"]["hs"], 1),
                         "tp": round(candidate["wave"]["tp"], 0),
                         "dir_deep": round(candidate["wave"]["dir"], 0),
+                        "dir_nearshore": round(candidate["wave"]["nearshore_dir"], 0),
                     },
                     "wind": {
                         "spd": round(candidate["wind"]["speed"], 1),

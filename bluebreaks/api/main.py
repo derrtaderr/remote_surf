@@ -14,6 +14,7 @@ import os
 
 from bluebreaks import __version__
 from bluebreaks.core.scanner import CoastlineScanner
+from bluebreaks.api.tiles import WindTileGenerator, SwellTileGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -175,22 +176,104 @@ async def predict(
 
 @app.get("/layer/wind")
 async def wind_layer(
+    bbox: str = Query(..., description="Bounding box: min_lon,min_lat,max_lon,max_lat"),
     time: Optional[str] = Query(None, description="ISO 8601 timestamp"),
-    format: str = Query("mvt", description="Output format (mvt, geojson)"),
+    spacing: float = Query(0.5, ge=0.1, le=2.0, description="Grid spacing in degrees"),
 ) -> JSONResponse:
-    """Wind barb vector tiles"""
-    # TODO: Implement wind barb tiler
-    return JSONResponse(status_code=501, content={"error": "Not yet implemented"})
+    """
+    Wind barb vector tiles (GeoJSON format)
+
+    Returns:
+        GeoJSON FeatureCollection with point features containing wind data
+    """
+    logger.info(f"Generating wind layer: bbox={bbox}, time={time}, spacing={spacing}")
+
+    try:
+        # Parse bbox
+        coords = [float(x) for x in bbox.split(",")]
+        if len(coords) != 4:
+            raise ValueError("BBox must have 4 coordinates")
+        bbox_tuple = tuple(coords)
+    except Exception as e:
+        return JSONResponse(
+            status_code=400, content={"error": f"Invalid bbox format: {str(e)}"}
+        )
+
+    # Parse time
+    time_dt = None
+    if time:
+        try:
+            time_dt = datetime.fromisoformat(time.replace("Z", "+00:00"))
+        except Exception as e:
+            logger.warning(f"Invalid time format: {e}, using None")
+
+    try:
+        # Check if GRIB exists
+        grib_path = GRIB_PATH if GRIB_PATH.exists() else None
+
+        # Generate wind tiles
+        generator = WindTileGenerator(grib_path)
+        generator.load_forecast(time_dt)
+        geojson = generator.generate_wind_points(bbox_tuple, spacing, time_dt)
+
+        return JSONResponse(content=geojson)
+
+    except Exception as e:
+        logger.error(f"Wind layer generation failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500, content={"error": f"Wind layer failed: {str(e)}"}
+        )
 
 
 @app.get("/layer/swell/deep")
 async def deep_swell_layer(
+    bbox: str = Query(..., description="Bounding box: min_lon,min_lat,max_lon,max_lat"),
     time: Optional[str] = Query(None, description="ISO 8601 timestamp"),
-    format: str = Query("mvt", description="Output format (mvt, geojson)"),
+    spacing: float = Query(0.5, ge=0.1, le=2.0, description="Grid spacing in degrees"),
 ) -> JSONResponse:
-    """Deep-water swell arrow tiles"""
-    # TODO: Implement swell arrow tiler
-    return JSONResponse(status_code=501, content={"error": "Not yet implemented"})
+    """
+    Deep-water swell arrow tiles (GeoJSON format)
+
+    Returns:
+        GeoJSON FeatureCollection with LineString features for swell arrows
+    """
+    logger.info(f"Generating swell layer: bbox={bbox}, time={time}, spacing={spacing}")
+
+    try:
+        # Parse bbox
+        coords = [float(x) for x in bbox.split(",")]
+        if len(coords) != 4:
+            raise ValueError("BBox must have 4 coordinates")
+        bbox_tuple = tuple(coords)
+    except Exception as e:
+        return JSONResponse(
+            status_code=400, content={"error": f"Invalid bbox format: {str(e)}"}
+        )
+
+    # Parse time
+    time_dt = None
+    if time:
+        try:
+            time_dt = datetime.fromisoformat(time.replace("Z", "+00:00"))
+        except Exception as e:
+            logger.warning(f"Invalid time format: {e}, using None")
+
+    try:
+        # Check if GRIB exists
+        grib_path = GRIB_PATH if GRIB_PATH.exists() else None
+
+        # Generate swell arrows
+        generator = SwellTileGenerator(grib_path)
+        generator.load_forecast(time_dt)
+        geojson = generator.generate_swell_arrows(bbox_tuple, spacing, time_dt)
+
+        return JSONResponse(content=geojson)
+
+    except Exception as e:
+        logger.error(f"Swell layer generation failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500, content={"error": f"Swell layer failed: {str(e)}"}
+        )
 
 
 @app.get("/timeseries")
