@@ -7,7 +7,7 @@ name = "bluebreaks"
 version = "0.1.0"
 description = "Find unknown surf from a sailboat using oceanographic data"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Remote Surf Contributors"}
@@ -30,7 +30,7 @@ dependencies = [
     "pydantic>=2.9.0",
     "pydantic-settings>=2.6.0",
     "xarray>=2024.10.0",
-    "numpy>=2.1.0",
+    "numpy>=1.24.0,<2.0.0",
     "scipy>=1.14.0",
     "pandas>=2.2.0",
     "geopandas>=1.0.0",

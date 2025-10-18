@@ -7,11 +7,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime
+from pathlib import Path
 import logging
+import os
 
 from bluebreaks import __version__
+from bluebreaks.core.scanner import CoastlineScanner
 
 logger = logging.getLogger(__name__)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+# Data paths (from environment or defaults)
+DATA_DIR = Path(os.getenv("BLUEBREAKS_DATA_DIR", "data"))
+GRIB_PATH = DATA_DIR / os.getenv("BLUEBREAKS_GRIB", "")
+BATHY_PATH = DATA_DIR / os.getenv("BLUEBREAKS_BATHY", "")
+COASTLINE_PATH = DATA_DIR / os.getenv("BLUEBREAKS_COASTLINE", "")
 
 app = FastAPI(
     title="Remote Surf API",
@@ -64,65 +77,81 @@ async def scan(
     bbox: str = Query(..., description="Bounding box: min_lon,min_lat,max_lon,max_lat"),
     time: Optional[str] = Query(None, description="ISO 8601 timestamp"),
     min_score: float = Query(0.0, ge=0.0, le=10.0, description="Minimum score threshold"),
+    spacing: float = Query(500.0, ge=100.0, le=2000.0, description="Point spacing in meters"),
 ) -> JSONResponse:
     """
     Scan a coastline for surf candidates
 
     Returns GeoJSON FeatureCollection of candidate surf spots with scores.
+
+    Example:
+        /scan?bbox=-116,22,-109,28&min_score=5.0&spacing=500
     """
-    # TODO: Implement actual scanning logic
-    logger.info(f"Scanning bbox={bbox}, time={time}, min_score={min_score}")
+    logger.info(f"Scanning bbox={bbox}, time={time}, min_score={min_score}, spacing={spacing}m")
 
     # Parse bbox
     try:
         coords = [float(x) for x in bbox.split(",")]
         if len(coords) != 4:
             raise ValueError("BBox must have 4 coordinates")
+        bbox_tuple = tuple(coords)
     except Exception as e:
         return JSONResponse(
             status_code=400, content={"error": f"Invalid bbox format: {str(e)}"}
         )
 
-    # Mock response
-    geojson = {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [-111.234, 26.543]},
-                "properties": {
-                    "id": "cpt_12345",
-                    "time": time or "2025-10-18T12:00:00Z",
-                    "final_score": 0.82,
-                    "physics_score": 0.76,
-                    "components": {
-                        "expo": 0.88,
-                        "refract": 1.10,
-                        "wind": 1.06,
-                        "tide": 0.96,
-                        "period": 1.18,
-                        "quality": 1.06,
-                    },
-                    "swell": {"hs": 2.1, "tp": 15, "dir_deep": 215, "dir_near": 238},
-                    "wind": {"spd": 8, "dir": 35, "label": "cross-off"},
-                    "tide": {"level_m": 1.2, "label": "mid"},
-                    "break_type": "point/reef",
-                    "bathy_slope": "steep",
-                    "shadowed": False,
-                    "anchorage": {
-                        "distance_nm": 0.7,
-                        "depth_m": 8,
-                        "lee_shore_risk": "low",
-                        "fetch": "protected S–W",
-                    },
-                    "remoteness": 0.82,
-                    "flags": ["reef nearby", "dinghy landing: moderate"],
-                },
-            }
-        ],
-    }
+    # Parse time
+    time_dt = None
+    if time:
+        try:
+            time_dt = datetime.fromisoformat(time.replace("Z", "+00:00"))
+        except Exception as e:
+            logger.warning(f"Invalid time format: {e}, using None")
 
-    return JSONResponse(content=geojson)
+    # Initialize scanner
+    try:
+        # Check if data files exist
+        grib_path = GRIB_PATH if GRIB_PATH.exists() else None
+        bathy_path = BATHY_PATH if BATHY_PATH.exists() else None
+        coastline_path = COASTLINE_PATH if COASTLINE_PATH.exists() else None
+
+        scanner = CoastlineScanner(
+            grib_path=grib_path,
+            bathy_path=bathy_path,
+            coastline_path=coastline_path,
+        )
+
+        # Run scan
+        geojson = scanner.scan(
+            bbox=bbox_tuple,
+            time=time_dt,
+            spacing_m=spacing,
+            min_score=min_score,
+        )
+
+        scanner.close()
+
+        # Add metadata
+        geojson["metadata"] = {
+            "bbox": bbox_tuple,
+            "time": time,
+            "min_score": min_score,
+            "spacing_m": spacing,
+            "num_candidates": len(geojson["features"]),
+            "data_sources": {
+                "grib": str(grib_path) if grib_path else "mock",
+                "bathymetry": str(bathy_path) if bathy_path else "mock",
+                "coastline": str(coastline_path) if coastline_path else "mock",
+            },
+        }
+
+        return JSONResponse(content=geojson)
+
+    except Exception as e:
+        logger.error(f"Scan failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500, content={"error": f"Scan failed: {str(e)}"}
+        )
 
 
 @app.get("/predict")
