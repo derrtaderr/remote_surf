@@ -183,18 +183,159 @@ async def predict(
     bbox: str = Query(..., description="Bounding box: min_lon,min_lat,max_lon,max_lat"),
     time: Optional[str] = Query(None, description="ISO 8601 timestamp"),
     min_score: float = Query(0.0, ge=0.0, le=10.0, description="Minimum score threshold"),
+    spacing: float = Query(500.0, ge=100.0, le=2000.0, description="Point spacing in meters"),
+    alpha: float = Query(0.6, ge=0.0, le=1.0, description="Physics weight (0-1, higher = more physics)"),
+    model_path: Optional[str] = Query(None, description="Path to trained model file"),
 ) -> JSONResponse:
     """
     Enhanced prediction with ML layer
 
     Returns GeoJSON with final_score = α*physics + (1-α)*ml
-    """
-    # TODO: Implement ML prediction layer
-    logger.info(f"Predicting bbox={bbox}, time={time}, min_score={min_score}")
 
-    return JSONResponse(
-        status_code=501, content={"error": "ML prediction not yet implemented"}
-    )
+    Example:
+        /predict?bbox=-116,22,-109,28&min_score=5.0&alpha=0.6
+    """
+    logger.info(f"Predicting bbox={bbox}, time={time}, min_score={min_score}, alpha={alpha}")
+
+    # Parse bbox
+    try:
+        coords = [float(x) for x in bbox.split(",")]
+        if len(coords) != 4:
+            raise ValueError("BBox must have 4 coordinates")
+        bbox_tuple = tuple(coords)
+    except Exception as e:
+        return JSONResponse(
+            status_code=400, content={"error": f"Invalid bbox format: {str(e)}"}
+        )
+
+    # Parse time
+    time_dt = None
+    if time:
+        try:
+            time_dt = datetime.fromisoformat(time.replace("Z", "+00:00"))
+        except Exception as e:
+            logger.warning(f"Invalid time format: {e}, using None")
+
+    try:
+        # Check if data files exist
+        grib_path = GRIB_PATH if GRIB_PATH.exists() else None
+        bathy_path = BATHY_PATH if BATHY_PATH.exists() else None
+        coastline_path = COASTLINE_PATH if COASTLINE_PATH.exists() else None
+
+        # Initialize scanner
+        scanner = CoastlineScanner(
+            grib_path=grib_path,
+            bathy_path=bathy_path,
+            coastline_path=coastline_path,
+        )
+
+        # Run scan to get physics scores
+        geojson = scanner.scan(
+            bbox=bbox_tuple,
+            time=time_dt,
+            spacing_m=spacing,
+            min_score=0.0,  # Get all candidates, filter after ML scoring
+        )
+
+        scanner.close()
+
+        # Try to load ML model if available
+        try:
+            from bluebreaks.core.predict.model import PUSurfPredictor, BlendedPredictor
+
+            pu_model = None
+
+            if model_path and Path(model_path).exists():
+                logger.info(f"Loading model from {model_path}")
+                pu_model = PUSurfPredictor()
+                pu_model.load(Path(model_path))
+            else:
+                logger.info("No ML model specified or found, using physics-only mode")
+
+            # Create blended predictor
+            blender = BlendedPredictor(pu_model=pu_model, alpha=alpha)
+
+            # Apply ML scoring to candidates
+            candidates_list = []
+            for feature in geojson["features"]:
+                # Convert GeoJSON feature to candidate dict
+                props = feature["properties"]
+                candidate = {
+                    "id": props["id"],
+                    "lat": feature["geometry"]["coordinates"][1],
+                    "lon": feature["geometry"]["coordinates"][0],
+                    "shore_normal": props["shore_normal"],
+                    "curvature": props["curvature"],
+                    "depth": props.get("depth_m", 10.0),
+                    "slope": props.get("slope", 0.05),
+                    "score": {
+                        "total": props["physics_score"],
+                        "components": props["components"]
+                    },
+                    "wave": props["swell"],
+                    "wind": props["wind"],
+                    "tide": props.get("tide", {}),
+                    "anchorage": props.get("anchorage", {}),
+                    "remoteness": props.get("remoteness", 0)
+                }
+                candidates_list.append(candidate)
+
+            # Apply blended scoring
+            scored_candidates = blender.predict_batch(candidates_list)
+
+            # Update GeoJSON features with ML scores
+            for i, feature in enumerate(geojson["features"]):
+                if i < len(scored_candidates):
+                    score_data = scored_candidates[i].get("score", {})
+                    feature["properties"]["final_score"] = score_data.get("final", score_data.get("total", 0))
+                    feature["properties"]["ml_score"] = score_data.get("ml_score", None)
+                    feature["properties"]["ml_prob"] = score_data.get("ml_prob", None)
+                    feature["properties"]["blend_alpha"] = alpha
+
+            # Filter by min_score (using final_score now)
+            geojson["features"] = [
+                f for f in geojson["features"]
+                if f["properties"]["final_score"] >= min_score
+            ]
+
+        except ImportError as e:
+            logger.warning(f"ML dependencies not available: {e}. Using physics-only mode.")
+            # Keep physics scores as final scores
+            for feature in geojson["features"]:
+                feature["properties"]["final_score"] = feature["properties"]["physics_score"]
+                feature["properties"]["ml_score"] = None
+                feature["properties"]["ml_prob"] = None
+                feature["properties"]["blend_alpha"] = 1.0
+
+            # Filter by physics score
+            geojson["features"] = [
+                f for f in geojson["features"]
+                if f["properties"]["final_score"] >= min_score
+            ]
+
+        # Add metadata
+        geojson["metadata"] = {
+            "bbox": bbox_tuple,
+            "time": time,
+            "min_score": min_score,
+            "spacing_m": spacing,
+            "num_candidates": len(geojson["features"]),
+            "blend_alpha": alpha,
+            "model_used": model_path is not None and Path(model_path).exists() if model_path else False,
+            "data_sources": {
+                "grib": str(grib_path) if grib_path else "mock",
+                "bathymetry": str(bathy_path) if bathy_path else "mock",
+                "coastline": str(coastline_path) if coastline_path else "mock",
+            },
+        }
+
+        return JSONResponse(content=geojson)
+
+    except Exception as e:
+        logger.error(f"Prediction failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500, content={"error": f"Prediction failed: {str(e)}"}
+        )
 
 
 @app.get("/layer/wind")
