@@ -39,10 +39,9 @@ export async function initializeNativeApp(): Promise<void> {
     await StatusBar.setStyle({ style: Style.Dark });
     await StatusBar.setBackgroundColor({ color: '#0c4a6e' });
 
-    // Hide splash screen after 2 seconds
-    setTimeout(async () => {
-      await SplashScreen.hide({ fadeOutDuration: 500 });
-    }, 2000);
+    // Hide splash screen after 2 seconds using Promise-based delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await SplashScreen.hide({ fadeOutDuration: 500 });
 
     console.log('[Native] App initialized');
   } catch (error) {
@@ -184,8 +183,15 @@ export async function scheduleLocalNotification(
 ): Promise<void> {
   if (!isNativePlatform()) {
     // Fall back to browser notifications
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body, ...extra });
+    if ('Notification' in window) {
+      // Request permission if not granted
+      if (Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body, ...extra });
+      }
     }
     return;
   }

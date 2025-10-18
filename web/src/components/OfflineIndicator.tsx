@@ -12,12 +12,14 @@ const OfflineIndicator = () => {
   const [showBanner, setShowBanner] = useState(false);
 
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+
     const cleanup = addNetworkListener(
       () => {
         setOnline(true);
         setShowBanner(true);
         // Hide "back online" message after 3 seconds
-        setTimeout(() => setShowBanner(false), 3000);
+        timeoutId = setTimeout(() => setShowBanner(false), 3000);
       },
       () => {
         setOnline(false);
@@ -25,7 +27,12 @@ const OfflineIndicator = () => {
       }
     );
 
-    return cleanup;
+    return () => {
+      cleanup();
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
   }, []);
 
   if (!showBanner) {
