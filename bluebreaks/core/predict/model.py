@@ -194,15 +194,17 @@ class PUSurfPredictor:
         # Save model
         self.model.save_model(str(model_path))
 
-        # Save metadata
+        # Save metadata with proper path handling
+        metadata_path = model_path.with_suffix('').with_suffix('.metadata.pkl')
         metadata = {
             'feature_names': self.feature_names,
             'params': self.params,
             'pos_weight': self.pos_weight
         }
-        joblib.dump(metadata, str(model_path).replace('.txt', '_metadata.pkl'))
+        joblib.dump(metadata, str(metadata_path))
 
         logger.info(f"Model saved to {model_path}")
+        logger.info(f"Metadata saved to {metadata_path}")
 
     def load(self, path: Path) -> None:
         """Load model from disk"""
@@ -214,13 +216,18 @@ class PUSurfPredictor:
         # Load model
         self.model = lgb.Booster(model_file=str(model_path))
 
-        # Load metadata
-        metadata = joblib.load(str(model_path).replace('.txt', '_metadata.pkl'))
+        # Load metadata with proper path handling
+        metadata_path = model_path.with_suffix('').with_suffix('.metadata.pkl')
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+
+        metadata = joblib.load(str(metadata_path))
         self.feature_names = metadata['feature_names']
         self.params = metadata['params']
         self.pos_weight = metadata['pos_weight']
 
         logger.info(f"Model loaded from {model_path}")
+        logger.info(f"Metadata loaded from {metadata_path}")
 
     def get_feature_importance(self, top_n: int = 20) -> pd.DataFrame:
         """
