@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import os
+import numpy as np
 
 from bluebreaks import __version__
 from bluebreaks.core.scanner import CoastlineScanner
@@ -278,11 +279,131 @@ async def deep_swell_layer(
 
 @app.get("/timeseries")
 async def timeseries(
-    point_id: str = Query(..., description="Candidate point ID"),
+    lat: float = Query(..., description="Latitude"),
+    lon: float = Query(..., description="Longitude"),
+    shore_normal: float = Query(..., description="Shore normal direction (degrees)"),
+    depth: float = Query(10.0, description="Depth at location (m)"),
+    slope: float = Query(0.05, description="Bottom slope"),
+    hours: int = Query(120, ge=24, le=240, description="Forecast hours (default 120 = 5 days)"),
 ) -> JSONResponse:
-    """5-day score timeline for a specific point"""
-    # TODO: Implement timeseries endpoint
-    return JSONResponse(status_code=501, content={"error": "Not yet implemented"})
+    """
+    Get 5-day score timeline for a specific location
+
+    Returns hourly scores, tide data, and best 3-hour windows.
+
+    Example:
+        /timeseries?lat=25.5&lon=-111.0&shore_normal=270&depth=8&slope=0.05&hours=120
+    """
+    logger.info(f"Timeseries for lat={lat}, lon={lon}, hours={hours}")
+
+    try:
+        from datetime import datetime, timedelta
+        from bluebreaks.core.tide import TideModule
+        from bluebreaks.core.wave.scoring import calculate_surf_score
+        from bluebreaks.core.wave.physics import calculate_exposure, compute_wave_transformation, shoaling_coefficient
+
+        # Initialize tide module
+        tide_module = TideModule()
+
+        # Generate time series (hourly)
+        start_time = datetime.now()
+        times = []
+        scores = []
+        tide_heights = []
+        wave_heights = []
+
+        for hour in range(hours):
+            current_time = start_time + timedelta(hours=hour)
+            times.append(current_time.isoformat())
+
+            # Mock wave/wind data (would come from GRIB forecast)
+            # In production, this would interpolate GRIB data at each time step
+            Hs = 2.0 + 0.5 * np.sin(hour * np.pi / 12)  # Varying swell
+            Tp = 12.0 + 2.0 * np.cos(hour * np.pi / 24)  # Varying period
+            wave_dir = 225.0  # SW swell
+            wind_speed = 5.0 + 2.0 * np.sin(hour * np.pi / 6)
+            wind_dir = 45.0
+
+            # Get tide
+            tide_info = tide_module.get_tide_info(lat, lon, current_time, slope)
+
+            # Calculate exposure and transformation
+            exposure = calculate_exposure(wave_dir, shore_normal)
+            transform = compute_wave_transformation(wave_dir, shore_normal, depth, Tp)
+            shoaling_coeff = shoaling_coefficient(50.0, depth, Tp)
+
+            # Calculate score
+            score_result = calculate_surf_score(
+                Hs=Hs,
+                Tp=Tp,
+                wave_dir=wave_dir,
+                wind_speed=wind_speed,
+                wind_dir=wind_dir,
+                shore_normal=shore_normal,
+                exposure=exposure,
+                refraction_coeff=transform["Kr"],
+                shoaling_coeff=shoaling_coeff,
+                curvature=0.02,
+                slope=slope,
+                tide_level=tide_info['height'],
+            )
+
+            scores.append(round(score_result['total'], 2))
+            tide_heights.append(tide_info['height'])
+            wave_heights.append(round(Hs, 1))
+
+        # Find best 3-hour windows
+        from bluebreaks.core.tide.tide_module import TideScorer
+        scorer = TideScorer()
+
+        # Convert times to datetime objects for window finding
+        time_objs = [datetime.fromisoformat(t) for t in times]
+        best_windows = scorer.find_best_windows(time_objs, scores, window_hours=3, top_n=5)
+
+        # Format response
+        response = {
+            "location": {
+                "lat": lat,
+                "lon": lon,
+                "shore_normal": shore_normal,
+                "depth_m": depth
+            },
+            "forecast": {
+                "start": times[0],
+                "end": times[-1],
+                "interval_hours": 1,
+                "hours": hours
+            },
+            "timeseries": {
+                "times": times,
+                "scores": scores,
+                "tide_heights_m": tide_heights,
+                "wave_heights_m": wave_heights
+            },
+            "best_windows": [
+                {
+                    "start": w['start'].isoformat(),
+                    "end": w['end'].isoformat(),
+                    "avg_score": w['avg_score'],
+                    "peak_score": w['peak_score'],
+                    "duration_hours": w['duration_hours']
+                }
+                for w in best_windows
+            ],
+            "summary": {
+                "avg_score": round(float(np.mean(scores)), 2),
+                "max_score": round(float(np.max(scores)), 2),
+                "min_score": round(float(np.min(scores)), 2)
+            }
+        }
+
+        return JSONResponse(content=response)
+
+    except Exception as e:
+        logger.error(f"Timeseries failed: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500, content={"error": f"Timeseries failed: {str(e)}"}
+        )
 
 
 if __name__ == "__main__":

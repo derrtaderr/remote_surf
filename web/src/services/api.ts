@@ -48,6 +48,20 @@ export interface SurfCandidate {
       spd: number;
       dir: number;
     };
+    tide?: {
+      height_m: number;
+      label: string;
+      station: string;
+    };
+    anchorage?: {
+      distance_nm: number;
+      depth_m: number;
+      lee_shore_risk: string;
+      fetch: string;
+      dinghy_landing: string;
+    };
+    remoteness?: number;
+    flags?: string[];
     shore_normal: number;
     curvature: number;
     depth_m: number;
@@ -109,6 +123,41 @@ export interface WindLayerResponse {
 export interface SwellLayerResponse {
   type: 'FeatureCollection';
   features: SwellFeature[];
+}
+
+export interface BestWindow {
+  start: string;
+  end: string;
+  avg_score: number;
+  peak_score: number;
+  duration_hours: number;
+}
+
+export interface TimeseriesResponse {
+  location: {
+    lat: number;
+    lon: number;
+    shore_normal: number;
+    depth_m: number;
+  };
+  forecast: {
+    start: string;
+    end: string;
+    interval_hours: number;
+    hours: number;
+  };
+  timeseries: {
+    times: string[];
+    scores: number[];
+    tide_heights_m: number[];
+    wave_heights_m: number[];
+  };
+  best_windows: BestWindow[];
+  summary: {
+    avg_score: number;
+    max_score: number;
+    min_score: number;
+  };
 }
 
 export class RemoteSurfAPI {
@@ -202,6 +251,37 @@ export class RemoteSurfAPI {
 
     if (!response.ok) {
       throw new Error(`Swell layer error: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Get timeseries forecast for a location
+   */
+  async getTimeseries(
+    lat: number,
+    lon: number,
+    shore_normal: number,
+    depth: number = 10.0,
+    slope: number = 0.05,
+    hours: number = 120
+  ): Promise<TimeseriesResponse> {
+    const queryParams = new URLSearchParams({
+      lat: lat.toString(),
+      lon: lon.toString(),
+      shore_normal: shore_normal.toString(),
+      depth: depth.toString(),
+      slope: slope.toString(),
+      hours: hours.toString(),
+    });
+
+    const url = `${this.baseUrl}/timeseries?${queryParams}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Timeseries error: ${response.statusText}`);
     }
 
     return response.json();

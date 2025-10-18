@@ -248,8 +248,27 @@ const MapView = ({ minScore, spacing }: MapViewProps) => {
                   </svg>
                 </div>
                 <div><strong>Wind:</strong> {selectedCandidate.properties.wind.spd}m/s @ {selectedCandidate.properties.wind.dir}°</div>
+                <div><strong>Tide:</strong> {selectedCandidate.properties.tide?.height_m}m ({selectedCandidate.properties.tide?.label})</div>
                 <div><strong>Depth:</strong> {selectedCandidate.properties.depth_m}m</div>
               </div>
+
+              {selectedCandidate.properties.anchorage && (
+                <div style={{ marginTop: '12px', fontSize: '12px', lineHeight: '1.5', borderTop: '1px solid #e5e7eb', paddingTop: '8px' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Anchorage</div>
+                  <div>Distance: {selectedCandidate.properties.anchorage.distance_nm}nm</div>
+                  <div>Depth: {selectedCandidate.properties.anchorage.depth_m}m</div>
+                  <div>Lee shore: {selectedCandidate.properties.anchorage.lee_shore_risk}</div>
+                  <div>Dinghy: {selectedCandidate.properties.anchorage.dinghy_landing}</div>
+                </div>
+              )}
+
+              {selectedCandidate.properties.flags && selectedCandidate.properties.flags.length > 0 && (
+                <div style={{ marginTop: '8px', fontSize: '11px' }}>
+                  {selectedCandidate.properties.flags.map((flag: string, i: number) => (
+                    <div key={i} style={{ color: '#dc2626', marginBottom: '2px' }}>⚠ {flag}</div>
+                  ))}
+                </div>
+              )}
 
               <div style={{ marginTop: '12px', fontSize: '11px', color: '#6b7280' }}>
                 {selectedCandidate.geometry.coordinates[1].toFixed(4)}°N, {selectedCandidate.geometry.coordinates[0].toFixed(4)}°E
