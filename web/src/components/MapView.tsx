@@ -248,7 +248,11 @@ const MapView = ({ minScore, spacing }: MapViewProps) => {
                   </svg>
                 </div>
                 <div><strong>Wind:</strong> {selectedCandidate.properties.wind.spd}m/s @ {selectedCandidate.properties.wind.dir}°</div>
-                <div><strong>Tide:</strong> {selectedCandidate.properties.tide?.height_m}m ({selectedCandidate.properties.tide?.label})</div>
+                {selectedCandidate.properties.tide ? (
+                  <div><strong>Tide:</strong> {selectedCandidate.properties.tide.height_m}m ({selectedCandidate.properties.tide.label})</div>
+                ) : (
+                  <div><strong>Tide:</strong> N/A</div>
+                )}
                 <div><strong>Depth:</strong> {selectedCandidate.properties.depth_m}m</div>
               </div>
 

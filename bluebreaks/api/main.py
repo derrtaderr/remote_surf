@@ -2,12 +2,12 @@
 FastAPI application for Remote Surf API
 """
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import logging
 import os
@@ -16,11 +16,33 @@ import numpy as np
 from bluebreaks import __version__
 from bluebreaks.core.scanner import CoastlineScanner
 from bluebreaks.api.tiles import WindTileGenerator, SwellTileGenerator
+from bluebreaks.core.data.grib_loader import GRIBLoader
+from bluebreaks.core.tide import TideModule
+from bluebreaks.core.wave.scoring import calculate_surf_score
+from bluebreaks.core.wave.physics import calculate_exposure, compute_wave_transformation, shoaling_coefficient
+from bluebreaks.core.tide.tide_module import TideScorer
 
 logger = logging.getLogger(__name__)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
+
+def validate_coordinates(lat: float, lon: float) -> None:
+    """
+    Validate geographic coordinates
+
+    Args:
+        lat: Latitude (-90 to 90)
+        lon: Longitude (-180 to 180)
+
+    Raises:
+        HTTPException: If coordinates are invalid
+    """
+    if not -90 <= lat <= 90:
+        raise HTTPException(status_code=400, detail=f"Invalid latitude: {lat}. Must be between -90 and 90.")
+    if not -180 <= lon <= 180:
+        raise HTTPException(status_code=400, detail=f"Invalid longitude: {lon}. Must be between -180 and 180.")
 
 # Data paths (from environment or defaults)
 DATA_DIR = Path(os.getenv("BLUEBREAKS_DATA_DIR", "data"))
@@ -294,35 +316,80 @@ async def timeseries(
     Example:
         /timeseries?lat=25.5&lon=-111.0&shore_normal=270&depth=8&slope=0.05&hours=120
     """
+    # Validate coordinates
+    validate_coordinates(lat, lon)
+
     logger.info(f"Timeseries for lat={lat}, lon={lon}, hours={hours}")
 
     try:
-        from datetime import datetime, timedelta
-        from bluebreaks.core.tide import TideModule
-        from bluebreaks.core.wave.scoring import calculate_surf_score
-        from bluebreaks.core.wave.physics import calculate_exposure, compute_wave_transformation, shoaling_coefficient
-
         # Initialize tide module
         tide_module = TideModule()
 
-        # Generate time series (hourly)
-        start_time = datetime.now()
+        # Generate time series (hourly) with timezone-aware datetime
+        start_time = datetime.now(timezone.utc)
         times = []
         scores = []
         tide_heights = []
         wave_heights = []
 
+        # Load GRIB data if available
+        grib_loader = None
+        grib_path = GRIB_PATH if GRIB_PATH.exists() else None
+        use_grib = False
+
+        if grib_path:
+            try:
+                grib_loader = GRIBLoader(grib_path)
+                grib_loader.load()
+                # Check if we have time-varying data
+                available_times = grib_loader.get_available_times()
+                use_grib = len(available_times) > 1
+                logger.info(f"Using GRIB data with {len(available_times)} time steps")
+            except Exception as e:
+                logger.warning(f"Could not load GRIB data: {e}. Using mock data.")
+                grib_loader = None
+
         for hour in range(hours):
             current_time = start_time + timedelta(hours=hour)
             times.append(current_time.isoformat())
 
-            # Mock wave/wind data (would come from GRIB forecast)
-            # In production, this would interpolate GRIB data at each time step
-            Hs = 2.0 + 0.5 * np.sin(hour * np.pi / 12)  # Varying swell
-            Tp = 12.0 + 2.0 * np.cos(hour * np.pi / 24)  # Varying period
-            wave_dir = 225.0  # SW swell
-            wind_speed = 5.0 + 2.0 * np.sin(hour * np.pi / 6)
-            wind_dir = 45.0
+            # Get wave/wind data from GRIB or use mock data
+            if use_grib and grib_loader:
+                try:
+                    # Extract data for single point (small bbox around point)
+                    bbox_buffer = 0.1  # degrees
+                    wave_data = grib_loader.extract_wave_data(
+                        lon_range=(lon - bbox_buffer, lon + bbox_buffer),
+                        lat_range=(lat - bbox_buffer, lat + bbox_buffer),
+                        time=current_time
+                    )
+                    wind_data = grib_loader.extract_wind_data(
+                        lon_range=(lon - bbox_buffer, lon + bbox_buffer),
+                        lat_range=(lat - bbox_buffer, lat + bbox_buffer),
+                        time=current_time
+                    )
+
+                    # Interpolate to exact location (use mean for now - could use scipy.interpolate)
+                    Hs = float(np.nanmean(wave_data.get('hs', 2.0)))
+                    Tp = float(np.nanmean(wave_data.get('tp', 12.0)))
+                    wave_dir = float(np.nanmean(wave_data.get('dp', 225.0)))
+                    wind_speed = float(np.nanmean(wind_data.get('speed', 5.0)))
+                    wind_dir = float(np.nanmean(wind_data.get('direction', 45.0)))
+                except Exception as e:
+                    logger.warning(f"GRIB extraction failed for hour {hour}: {e}. Using mock data.")
+                    # Fallback to mock data
+                    Hs = 2.0 + 0.5 * np.sin(hour * np.pi / 12)
+                    Tp = 12.0 + 2.0 * np.cos(hour * np.pi / 24)
+                    wave_dir = 225.0
+                    wind_speed = 5.0 + 2.0 * np.sin(hour * np.pi / 6)
+                    wind_dir = 45.0
+            else:
+                # Mock wave/wind data (sinusoidal variation for development)
+                Hs = 2.0 + 0.5 * np.sin(hour * np.pi / 12)  # Varying swell
+                Tp = 12.0 + 2.0 * np.cos(hour * np.pi / 24)  # Varying period
+                wave_dir = 225.0  # SW swell
+                wind_speed = 5.0 + 2.0 * np.sin(hour * np.pi / 6)
+                wind_dir = 45.0
 
             # Get tide
             tide_info = tide_module.get_tide_info(lat, lon, current_time, slope)
@@ -352,8 +419,11 @@ async def timeseries(
             tide_heights.append(tide_info['height'])
             wave_heights.append(round(Hs, 1))
 
+        # Clean up GRIB loader
+        if grib_loader:
+            grib_loader.close()
+
         # Find best 3-hour windows
-        from bluebreaks.core.tide.tide_module import TideScorer
         scorer = TideScorer()
 
         # Convert times to datetime objects for window finding
@@ -399,6 +469,8 @@ async def timeseries(
 
         return JSONResponse(content=response)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Timeseries failed: {e}", exc_info=True)
         return JSONResponse(
