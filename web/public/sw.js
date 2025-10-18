@@ -21,7 +21,6 @@ const CACHE_STRATEGIES = {
 
 // Resources to cache immediately on install
 const APP_SHELL_CACHE = [
-  '/',
   '/index.html',
   '/manifest.json'
 ];
@@ -239,13 +238,14 @@ async function cacheFirst(request, cache, maxAge) {
 self.addEventListener('message', (event) => {
   if (event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
+    event.ports[0]?.postMessage({ success: true });
   }
 
   if (event.data.type === 'CLEAR_CACHE') {
     event.waitUntil(
       caches.delete(CACHE_NAME).then(() => {
         console.log('[SW] Cache cleared');
-        return { success: true };
+        event.ports[0]?.postMessage({ success: true });
       })
     );
   }
@@ -254,7 +254,7 @@ self.addEventListener('message', (event) => {
     event.waitUntil(
       caches.open(CACHE_NAME).then(async (cache) => {
         const keys = await cache.keys();
-        return { size: keys.length };
+        event.ports[0]?.postMessage({ size: keys.length });
       })
     );
   }

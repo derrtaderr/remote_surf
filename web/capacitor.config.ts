@@ -7,8 +7,12 @@ const config: CapacitorConfig = {
   server: {
     androidScheme: 'https',
     iosScheme: 'https',
-    // Allow CORS for API requests
-    allowNavigation: ['*']
+    // Allow navigation only to specific domains
+    allowNavigation: [
+      'localhost:*',
+      '*.remotesurf.app',
+      'api.remotesurf.app'
+    ]
   },
   plugins: {
     SplashScreen: {
@@ -39,7 +43,8 @@ const config: CapacitorConfig = {
       keystorePath: '',
       keystoreAlias: ''
     },
-    allowMixedContent: true
+    // Only allow mixed content in development
+    allowMixedContent: false
   }
 };
 
