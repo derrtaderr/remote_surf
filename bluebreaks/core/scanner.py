@@ -21,12 +21,14 @@ from bluebreaks.core.data.grib_loader import GRIBLoader
 from bluebreaks.core.data.bathy_loader import BathymetryLoader
 from bluebreaks.core.data.coastline_loader import CoastlineLoader
 from bluebreaks.core.geo.coastline import generate_candidate_points, refine_normal_with_land_polygon
+from bluebreaks.core.geo.anchorage import evaluate_anchorage, calculate_remoteness
 from bluebreaks.core.wave.physics import (
     calculate_exposure,
     compute_wave_transformation,
     shoaling_coefficient,
 )
 from bluebreaks.core.wave.scoring import calculate_surf_score
+from bluebreaks.core.tide import TideModule
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ class CoastlineScanner:
         grib_path: Optional[Path] = None,
         bathy_path: Optional[Path] = None,
         coastline_path: Optional[Path] = None,
+        tide_stations_path: Optional[Path] = None,
     ):
         """
         Initialize scanner with data sources
@@ -47,14 +50,17 @@ class CoastlineScanner:
             grib_path: Path to GRIB forecast file
             bathy_path: Path to bathymetry file
             coastline_path: Path to coastline shapefile/GeoJSON
+            tide_stations_path: Path to tide stations JSON file
         """
         self.grib_path = grib_path
         self.bathy_path = bathy_path
         self.coastline_path = coastline_path
+        self.tide_stations_path = tide_stations_path
 
         self.grib_loader: Optional[GRIBLoader] = None
         self.bathy_loader: Optional[BathymetryLoader] = None
         self.coastline_loader: Optional[CoastlineLoader] = None
+        self.tide_module: Optional[TideModule] = None
 
     def scan(
         self,
@@ -96,7 +102,7 @@ class CoastlineScanner:
             )
 
         # Score candidates
-        candidates = self._score_candidates(candidates, wave_data, wind_data)
+        candidates = self._score_candidates(candidates, wave_data, wind_data, time)
 
         # Filter by score
         candidates = [c for c in candidates if c.get("score", {}).get("total", 0) >= min_score]
@@ -171,9 +177,13 @@ class CoastlineScanner:
         return candidates
 
     def _score_candidates(
-        self, candidates: List[Dict], wave_data: Dict, wind_data: Dict
+        self, candidates: List[Dict], wave_data: Dict, wind_data: Dict, time: Optional[datetime] = None
     ) -> List[Dict]:
         """Score all candidates"""
+        # Initialize tide module if not already done
+        if not self.tide_module:
+            self.tide_module = TideModule(self.tide_stations_path)
+
         # Use mean values from wave/wind grids (simplified)
         Hs = float(np.nanmean(wave_data.get("hs", 2.0)))
         Tp = float(np.nanmean(wave_data.get("tp", 12.0)))
@@ -181,6 +191,10 @@ class CoastlineScanner:
 
         wind_speed = float(np.nanmean(wind_data.get("speed", 5.0)))
         wind_dir = float(np.nanmean(wind_data.get("direction", 45.0)))
+
+        # Use current time if not specified
+        if time is None:
+            time = datetime.now()
 
         for candidate in candidates:
             shore_normal = candidate["shore_normal"]
@@ -204,6 +218,14 @@ class CoastlineScanner:
             shoaling_coeff = shoaling_coefficient(50.0, depth, Tp)
             refraction_coeff = transform["Kr"]
 
+            # Get tide information
+            tide_info = self.tide_module.get_tide_info(
+                lat=candidate["lat"],
+                lon=candidate["lon"],
+                time=time,
+                slope=slope
+            )
+
             # Calculate score
             score_result = calculate_surf_score(
                 Hs=Hs,
@@ -217,6 +239,7 @@ class CoastlineScanner:
                 shoaling_coeff=shoaling_coeff,
                 curvature=curvature,
                 slope=slope,
+                tide_level=tide_info['height'],  # Add tide level for scoring
             )
 
             candidate["score"] = score_result
@@ -227,6 +250,27 @@ class CoastlineScanner:
                 "nearshore_dir": nearshore_dir  # Add transformed direction
             }
             candidate["wind"] = {"speed": wind_speed, "dir": wind_dir}
+            candidate["tide"] = {
+                "height": tide_info['height'],
+                "label": tide_info['label'],
+                "station": tide_info['station_name']
+            }
+
+            # Evaluate anchorage suitability
+            land_polygon = self.coastline_loader.land_polygon if self.coastline_loader else None
+            anchorage = evaluate_anchorage(
+                candidate_lat=candidate["lat"],
+                candidate_lon=candidate["lon"],
+                candidate_depth=depth,
+                wind_dir=wind_dir,
+                shore_normal=shore_normal,
+                land_polygon=land_polygon
+            )
+            candidate["anchorage"] = anchorage
+
+            # Calculate remoteness
+            remoteness = calculate_remoteness(candidate["lat"], candidate["lon"])
+            candidate["remoteness"] = remoteness
 
         return candidates
 
@@ -256,6 +300,20 @@ class CoastlineScanner:
                         "spd": round(candidate["wind"]["speed"], 1),
                         "dir": round(candidate["wind"]["dir"], 0),
                     },
+                    "tide": {
+                        "height_m": candidate["tide"]["height"],
+                        "label": candidate["tide"]["label"],
+                        "station": candidate["tide"]["station"],
+                    },
+                    "anchorage": {
+                        "distance_nm": candidate["anchorage"]["distance_nm"],
+                        "depth_m": candidate["anchorage"]["depth_m"],
+                        "lee_shore_risk": candidate["anchorage"]["lee_shore_risk"],
+                        "fetch": candidate["anchorage"]["fetch"],
+                        "dinghy_landing": candidate["anchorage"]["dinghy_landing"],
+                    },
+                    "remoteness": round(candidate["remoteness"], 2),
+                    "flags": candidate["anchorage"]["flags"],
                     "shore_normal": round(candidate["shore_normal"], 1),
                     "curvature": round(candidate["curvature"], 4),
                     "depth_m": round(candidate.get("depth", 10.0), 1),
